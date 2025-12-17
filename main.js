@@ -48,8 +48,36 @@ uiVoitto.style.border = '4px solid #ffeb3b';
 uiVoitto.innerText = 'Onnittelut, löysit kaikki 8 sientä!';
 document.body.appendChild(uiVoitto);
 
+const uiGameOver = document.createElement('div');
+uiGameOver.style.position = 'absolute';
+uiGameOver.style.top = '50%';
+uiGameOver.style.left = '50%';
+uiGameOver.style.transform = 'translate(-50%, -50%)';
+uiGameOver.style.padding = '40px';
+uiGameOver.style.background = 'rgba(100, 0, 0, 0.9)';
+uiGameOver.style.color = 'white';
+uiGameOver.style.fontFamily = 'Arial, sans-serif';
+uiGameOver.style.borderRadius = '20px';
+uiGameOver.style.textAlign = 'center';
+uiGameOver.style.display = 'none';
+uiGameOver.style.zIndex = '100';
+
+const gameOverText = document.createElement('p');
+gameOverText.innerText = 'Voi ei! Sieni sai sinut kiinni! Aloitetaanko alusta?';
+gameOverText.style.fontSize = '22px';
+uiGameOver.appendChild(gameOverText);
+
+const restartBtn = document.createElement('button');
+restartBtn.innerText = 'Aloita alusta';
+restartBtn.style.padding = '10px 20px';
+restartBtn.style.fontSize = '18px';
+restartBtn.style.cursor = 'pointer';
+restartBtn.onclick = resetGame;
+uiGameOver.appendChild(restartBtn);
+document.body.appendChild(uiGameOver);
+
 // ====================================================================
-// --- PERUSKOMPONENTIT ---
+// --- PERUSKOMPONENTIT JA MUUTTUJAT ---
 // ====================================================================
 
 const scene = new THREE.Scene();
@@ -60,39 +88,33 @@ renderer.setClearColor(0x87ceeb);
 renderer.shadowMap.enabled = true;
 document.body.appendChild(renderer.domElement);
 
-// ====================================================================
-// --- MUUTTUJAT ---
-// ====================================================================
-
 const moveState = { forward: false, backward: false, left: false, right: false, shift: false };
 const baseSpeed = 0.15;
 const runSpeed = 0.25;
 const gravity = -0.02;
 let velocityY = 0;
 let isOnGround = true;
+let isGameOver = false;
 
 const normalGroundY = 0.5;
 const waterGroundY = -0.3; 
 let currentGroundY = normalGroundY;
 
-let character, controls, duck, enemy;
+let character, controls, duck, enemy, snowParticles;
 const loader = new GLTFLoader();
 const collidableObjects = []; 
 const rocks = [];            
 const mushrooms = [];
+const ripples = []; 
 let mushroomsCollected = 0;
 
-// Vihollisen asetukset (Sieni)
-const enemySpeed = 0.05; // Nopeutettu hieman
-
-// Interaktiot
+const enemySpeed = 0.05;
 let heldRock = null;         
 let flyingRock = null;       
 let rockVelocity = new THREE.Vector3();
 
-// Efektit
-let snowParticles;
-const ripples = []; 
+const pondCenter = new THREE.Vector3(15, 0.05, -15);
+const pondRadius = 5.2;
 let duckTarget = new THREE.Vector3();
 const duckSpeed = 0.02;
 const modelRotationOffset = -Math.PI / 2; 
@@ -101,10 +123,7 @@ const modelRotationOffset = -Math.PI / 2;
 // --- MAAILMAN RAKENTAMINEN ---
 // ====================================================================
 
-const floor = new THREE.Mesh(
-    new THREE.PlaneGeometry(100, 100),
-    new THREE.MeshStandardMaterial({ color: 0x4caf50 })
-);
+const floor = new THREE.Mesh(new THREE.PlaneGeometry(100, 100), new THREE.MeshStandardMaterial({ color: 0x4caf50 }));
 floor.rotation.x = -Math.PI / 2;
 floor.receiveShadow = true;
 scene.add(floor);
@@ -124,27 +143,11 @@ function createTree(x, z) {
     group.add(trunk, leaves);
     group.position.set(x, 0, z);
     scene.add(group);
-    collidableObjects.push(trunk);
-}
-
-function createRock(x, z, s = 1) {
-    const rock = new THREE.Mesh(new THREE.IcosahedronGeometry(1.5 * s, 0), new THREE.MeshStandardMaterial({ color: 0x707070 }));
-    rock.position.set(x, 0.7 * s, z);
-    rock.scale.y = 0.6;
-    rock.userData.size = s; 
-    scene.add(rock);
-    rocks.push(rock); 
 }
 
 for(let i = 0; i < 10; i++) createTree((Math.random()-0.5)*80, (Math.random()-0.5)*80);
-for(let i = 0; i < 8; i++) createRock((Math.random()-0.5)*80, (Math.random()-0.5)*80, 0.3+Math.random()*0.4);
 
-const pondCenter = new THREE.Vector3(15, 0.05, -15);
-const pondRadius = 5.2;
-const pond = new THREE.Mesh(
-    new THREE.CylinderGeometry(pondRadius, pondRadius, 0.1, 64),
-    new THREE.MeshStandardMaterial({ color: 0x0044ff, transparent: true, opacity: 0.7, metalness: 0.9, roughness: 0.1 })
-);
+const pond = new THREE.Mesh(new THREE.CylinderGeometry(pondRadius, pondRadius, 0.1, 64), new THREE.MeshStandardMaterial({ color: 0x0044ff, transparent: true, opacity: 0.7, metalness: 0.9, roughness: 0.1 }));
 pond.position.copy(pondCenter);
 scene.add(pond);
 
@@ -159,8 +162,15 @@ function createMushroom(x, z) {
     scene.add(group);
     mushrooms.push(group);
 }
-for(let i = 0; i < 8; i++) createMushroom((Math.random()-0.5)*60, (Math.random()-0.5)*60);
 
+function spawnMushrooms() {
+    mushrooms.forEach(m => scene.remove(m));
+    mushrooms.length = 0;
+    for(let i = 0; i < 8; i++) createMushroom((Math.random()-0.5)*60, (Math.random()-0.5)*60);
+}
+spawnMushrooms();
+
+// Lumisade
 const snowCount = 500;
 const snowGeo = new THREE.BufferGeometry();
 const snowPos = new Float32Array(snowCount * 3);
@@ -195,26 +205,29 @@ loader.load('hahmo.glb', (gltf) => {
     controls = new OrbitControls(camera, renderer.domElement);
 });
 
+loader.load('vihollinen.glb', (gltf) => {
+    enemy = gltf.scene;
+    enemy.scale.set(0.5, 0.5, 0.5);
+    enemy.position.set(-25, normalGroundY, -25); 
+    scene.add(enemy);
+});
+
+// KORJATTU: Ankka aloittaa lammesta
+loader.load('ankka.glb', (gltf) => {
+    duck = gltf.scene;
+    duck.scale.set(0.12, 0.12, 0.12);
+    duck.position.copy(pondCenter); 
+    scene.add(duck);
+    setNewDuckTarget();
+});
+
+// PALAUTETTU: Mökki maailmaan
 loader.load('mokki.glb', (gltf) => {
     const house = gltf.scene;
     house.scale.set(0.01, 0.01, 0.01);
     house.position.set(0, 0, -20);
     scene.add(house);
-});
-
-loader.load('ankka.glb', (gltf) => {
-    duck = gltf.scene;
-    duck.scale.set(0.12, 0.12, 0.12);
-    duck.position.copy(pondCenter);
-    scene.add(duck);
-    setNewDuckTarget();
-});
-
-loader.load('vihollinen.glb', (gltf) => {
-    enemy = gltf.scene;
-    enemy.scale.set(0.5, 0.5, 0.5);
-    enemy.position.set(-20, normalGroundY, -20); 
-    scene.add(enemy);
+    house.traverse(c => { if(c.isMesh) collidableObjects.push(c); });
 });
 
 function setNewDuckTarget() {
@@ -224,11 +237,22 @@ function setNewDuckTarget() {
 }
 
 // ====================================================================
-// --- HIIRI JA NÄPPÄIMET ---
+// --- RESET JA KONTROLLIT ---
 // ====================================================================
 
+function resetGame() {
+    mushroomsCollected = 0;
+    uiSienet.innerText = 'Sieniä kerätty: 0 / 8';
+    uiGameOver.style.display = 'none';
+    uiVoitto.style.display = 'none';
+    isGameOver = false;
+    if (character) character.position.set(0, normalGroundY, 0);
+    if (enemy) enemy.position.set(-25, normalGroundY, -25);
+    spawnMushrooms();
+}
+
 window.addEventListener('mousedown', (event) => {
-    if (event.button !== 0 || !character) return; 
+    if (isGameOver || event.button !== 0 || !character) return; 
     if (!heldRock) {
         let closestRock = null; let minDist = 3.0;
         rocks.forEach(rock => {
@@ -245,19 +269,20 @@ window.addEventListener('mousedown', (event) => {
         rockVelocity.copy(finalDir).multiplyScalar(0.5);
         rockVelocity.y = 0.25; 
         flyingRock = throwRock;
-        const idx = rocks.indexOf(flyingRock); if (idx > -1) rocks.splice(idx, 1);
     }
 });
 
 window.addEventListener('keydown', (e) => {
+    if (isGameOver) return;
     const k = e.key.toLowerCase();
     if (k === 'w') moveState.forward = true; 
     if (k === 's') moveState.backward = true;
     if (k === 'a') moveState.right = true; 
     if (k === 'd') moveState.left = true;
-    if (e.shiftKey) moveState.shift = true; // Juoksu
+    if (e.shiftKey) moveState.shift = true;
     if (k === ' ' && isOnGround) { velocityY = 0.3; isOnGround = false; }
 });
+
 window.addEventListener('keyup', (e) => {
     const k = e.key.toLowerCase();
     if (k === 'w') moveState.forward = false; 
@@ -268,14 +293,20 @@ window.addEventListener('keyup', (e) => {
 });
 
 // ====================================================================
-// --- PÄIVITYSSILMUKKA ---
+// --- ANIMAATIOSILMUKKA ---
 // ====================================================================
 
 function animate() {
     requestAnimationFrame(animate);
     const t = Date.now() * 0.001;
 
-    if (character && controls) {
+    if (character && enemy && !isGameOver) {
+        const distToEnemy = character.position.distanceTo(enemy.position);
+        if (distToEnemy < 1.0) {
+            isGameOver = true;
+            uiGameOver.style.display = 'block';
+        }
+
         const dPond = new THREE.Vector2(character.position.x, character.position.z).distanceTo(new THREE.Vector2(pondCenter.x, pondCenter.z));
         currentGroundY = (dPond < pondRadius) ? waterGroundY : normalGroundY;
 
@@ -294,20 +325,15 @@ function animate() {
         if (moveState.left) mDir.add(camSide); if (moveState.right) mDir.sub(camSide);
 
         if (mDir.length() > 0) {
-            mDir.normalize();
-            // Juoksunopeuden säätö
             const activeSpeed = moveState.shift ? runSpeed : baseSpeed;
-            const curSpeed = (dPond < pondRadius) ? activeSpeed * 0.5 : activeSpeed;
-            
-            character.position.addScaledVector(mDir, curSpeed);
+            character.position.addScaledVector(mDir.normalize(), (dPond < pondRadius ? activeSpeed * 0.5 : activeSpeed));
             character.rotation.y = Math.atan2(mDir.x, mDir.z) + modelRotationOffset;
             if (dPond < pondRadius && Math.random() < 0.1) createRipple(character.position.x, character.position.z);
         }
 
         for (let i = mushrooms.length - 1; i >= 0; i--) {
             if (character.position.distanceTo(mushrooms[i].position) < 1.0) {
-                scene.remove(mushrooms[i]);
-                mushrooms.splice(i, 1);
+                scene.remove(mushrooms[i]); mushrooms.splice(i, 1);
                 mushroomsCollected++;
                 uiSienet.innerText = `Sieniä kerätty: ${mushroomsCollected} / 8`;
                 if (mushroomsCollected === 8) uiVoitto.style.display = 'block';
@@ -317,40 +343,26 @@ function animate() {
         controls.target.copy(character.position).add(new THREE.Vector3(0, 1.5, 0));
         controls.update();
 
-        // VIHOLLISEN JAHTAUSLIIKE (POMPPIVA SIENI)
-        if (enemy) {
-            const enemyToChar = new THREE.Vector3().subVectors(character.position, enemy.position);
-            enemyToChar.y = 0; 
-            
-            if (enemyToChar.length() > 0.5) { 
-                enemyToChar.normalize();
-                enemy.position.addScaledVector(enemyToChar, enemySpeed);
-                enemy.rotation.y = Math.atan2(enemyToChar.x, enemyToChar.z);
-                
-                // POMPPIVA LIIKE
-                // Math.abs(Math.sin) saa aikaan jatkuvan nousevan ja laskevan loikan
-                enemy.position.y = normalGroundY + Math.abs(Math.sin(t * 10)) * 0.5;
-            }
+        const enemyToChar = new THREE.Vector3().subVectors(character.position, enemy.position);
+        enemyToChar.y = 0;
+        if (enemyToChar.length() > 0.1) {
+            enemyToChar.normalize();
+            enemy.position.addScaledVector(enemyToChar, enemySpeed);
+            enemy.rotation.y = Math.atan2(enemyToChar.x, enemyToChar.z);
+            enemy.position.y = normalGroundY + Math.abs(Math.sin(t * 10)) * 0.5;
         }
     }
 
+    // Lumisade ja vesirenkaat
     const snowArr = snowParticles.geometry.attributes.position.array;
     for(let i=1; i<snowArr.length; i+=3) { snowArr[i] -= 0.05; if (snowArr[i] < 0) snowArr[i] = 50; }
     snowParticles.geometry.attributes.position.needsUpdate = true;
 
     ripples.forEach((r, i) => {
-        r.age += 0.02;
-        r.mesh.scale.set(1 + r.age*5, 1 + r.age*5, 1);
+        r.age += 0.02; r.mesh.scale.set(1 + r.age*5, 1 + r.age*5, 1);
         r.mesh.material.opacity = 0.5 - r.age;
         if (r.age > 0.5) { scene.remove(r.mesh); ripples.splice(i, 1); }
     });
-
-    if (flyingRock) {
-        flyingRock.position.add(rockVelocity); rockVelocity.y += gravity;
-        const rd = new THREE.Vector2(flyingRock.position.x, flyingRock.position.z).distanceTo(new THREE.Vector2(pondCenter.x, pondCenter.z));
-        const rg = (rd < pondRadius) ? -0.1 : 0.4 * flyingRock.userData.size;
-        if (flyingRock.position.y <= rg) { flyingRock.position.y = rg; rocks.push(flyingRock); flyingRock = null; }
-    }
 
     if (duck) {
         const dt = duck.position.distanceTo(duckTarget);
