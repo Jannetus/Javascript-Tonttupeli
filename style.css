@@ -1,0 +1,14 @@
+/* Nollaa selaimen oletusmarginaalit ja täytteet */
+body {
+    margin: 0;
+    overflow: hidden; /* Estää vierityspalkit, jos näyttö on asetettu täyttämään koko ikkuna */
+    background-color: #000000; /* Musta tausta ennen 3D-sisällön latautumista */
+}
+
+/* Three.js luo tyypillisesti <canvas>-elementin. 
+   Tämä varmistaa, että se täyttää koko näkymän */
+canvas {
+    display: block;
+    width: 100vw;
+    height: 100vh;
+}
