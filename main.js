@@ -6,7 +6,6 @@ import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 // --- KÄYTTÖLIITTYMÄT (UI) ---
 // ====================================================================
 
-// Repun UI
 const uiRepu = document.createElement('div');
 uiRepu.style.position = 'absolute';
 uiRepu.style.bottom = '20px';
@@ -19,7 +18,6 @@ uiRepu.style.borderRadius = '5px';
 uiRepu.innerText = 'Kantaa: -';
 document.body.appendChild(uiRepu);
 
-// Sieni-UI
 const uiSienet = document.createElement('div');
 uiSienet.style.position = 'absolute';
 uiSienet.style.top = '20px';
@@ -32,7 +30,6 @@ uiSienet.style.borderRadius = '5px';
 uiSienet.innerText = 'Sieniä kerätty: 0 / 8';
 document.body.appendChild(uiSienet);
 
-// VOITTORUUTU-UI
 const uiVoitto = document.createElement('div');
 uiVoitto.style.position = 'absolute';
 uiVoitto.style.top = '50%';
@@ -46,7 +43,7 @@ uiVoitto.style.fontSize = '24px';
 uiVoitto.style.fontWeight = 'bold';
 uiVoitto.style.borderRadius = '20px';
 uiVoitto.style.textAlign = 'center';
-uiVoitto.style.display = 'none'; // Piilossa alussa
+uiVoitto.style.display = 'none'; 
 uiVoitto.style.border = '4px solid #ffeb3b';
 uiVoitto.innerText = 'Onnittelut, löysit kaikki 8 sientä!';
 document.body.appendChild(uiVoitto);
@@ -67,8 +64,9 @@ document.body.appendChild(renderer.domElement);
 // --- MUUTTUJAT ---
 // ====================================================================
 
-const moveState = { forward: false, backward: false, left: false, right: false };
-const speed = 0.15;
+const moveState = { forward: false, backward: false, left: false, right: false, shift: false };
+const baseSpeed = 0.15;
+const runSpeed = 0.25;
 const gravity = -0.02;
 let velocityY = 0;
 let isOnGround = true;
@@ -77,12 +75,15 @@ const normalGroundY = 0.5;
 const waterGroundY = -0.3; 
 let currentGroundY = normalGroundY;
 
-let character, controls, duck;
+let character, controls, duck, enemy;
 const loader = new GLTFLoader();
 const collidableObjects = []; 
 const rocks = [];            
 const mushrooms = [];
 let mushroomsCollected = 0;
+
+// Vihollisen asetukset (Sieni)
+const enemySpeed = 0.05; // Nopeutettu hieman
 
 // Interaktiot
 let heldRock = null;         
@@ -100,7 +101,6 @@ const modelRotationOffset = -Math.PI / 2;
 // --- MAAILMAN RAKENTAMINEN ---
 // ====================================================================
 
-// Maa
 const floor = new THREE.Mesh(
     new THREE.PlaneGeometry(100, 100),
     new THREE.MeshStandardMaterial({ color: 0x4caf50 })
@@ -109,14 +109,12 @@ floor.rotation.x = -Math.PI / 2;
 floor.receiveShadow = true;
 scene.add(floor);
 
-// Valot
 scene.add(new THREE.AmbientLight(0xffffff, 0.6));
 const sun = new THREE.DirectionalLight(0xffffff, 1.5);
 sun.position.set(10, 20, 10);
 sun.castShadow = true;
 scene.add(sun);
 
-// Ympäristöfunktiot
 function createTree(x, z) {
     const group = new THREE.Group();
     const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.3, 0.3, 4), new THREE.MeshStandardMaterial({ color: 0x8b4513 }));
@@ -141,7 +139,6 @@ function createRock(x, z, s = 1) {
 for(let i = 0; i < 10; i++) createTree((Math.random()-0.5)*80, (Math.random()-0.5)*80);
 for(let i = 0; i < 8; i++) createRock((Math.random()-0.5)*80, (Math.random()-0.5)*80, 0.3+Math.random()*0.4);
 
-// Lampi
 const pondCenter = new THREE.Vector3(15, 0.05, -15);
 const pondRadius = 5.2;
 const pond = new THREE.Mesh(
@@ -151,7 +148,6 @@ const pond = new THREE.Mesh(
 pond.position.copy(pondCenter);
 scene.add(pond);
 
-// Sienet
 function createMushroom(x, z) {
     const group = new THREE.Group();
     const stem = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.1, 0.4), new THREE.MeshStandardMaterial({color: 0xffffff}));
@@ -165,7 +161,6 @@ function createMushroom(x, z) {
 }
 for(let i = 0; i < 8; i++) createMushroom((Math.random()-0.5)*60, (Math.random()-0.5)*60);
 
-// Lumisade
 const snowCount = 500;
 const snowGeo = new THREE.BufferGeometry();
 const snowPos = new Float32Array(snowCount * 3);
@@ -215,6 +210,13 @@ loader.load('ankka.glb', (gltf) => {
     setNewDuckTarget();
 });
 
+loader.load('vihollinen.glb', (gltf) => {
+    enemy = gltf.scene;
+    enemy.scale.set(0.5, 0.5, 0.5);
+    enemy.position.set(-20, normalGroundY, -20); 
+    scene.add(enemy);
+});
+
 function setNewDuckTarget() {
     const angle = Math.random()*Math.PI*2;
     const dist = Math.random()*(pondRadius-1);
@@ -222,7 +224,7 @@ function setNewDuckTarget() {
 }
 
 // ====================================================================
-// --- KONTROLLIT JA INTERAKTIOT ---
+// --- HIIRI JA NÄPPÄIMET ---
 // ====================================================================
 
 window.addEventListener('mousedown', (event) => {
@@ -249,14 +251,20 @@ window.addEventListener('mousedown', (event) => {
 
 window.addEventListener('keydown', (e) => {
     const k = e.key.toLowerCase();
-    if (k === 'w') moveState.forward = true; if (k === 's') moveState.backward = true;
-    if (k === 'a') moveState.right = true; if (k === 'd') moveState.left = true;
+    if (k === 'w') moveState.forward = true; 
+    if (k === 's') moveState.backward = true;
+    if (k === 'a') moveState.right = true; 
+    if (k === 'd') moveState.left = true;
+    if (e.shiftKey) moveState.shift = true; // Juoksu
     if (k === ' ' && isOnGround) { velocityY = 0.3; isOnGround = false; }
 });
 window.addEventListener('keyup', (e) => {
     const k = e.key.toLowerCase();
-    if (k === 'w') moveState.forward = false; if (k === 's') moveState.backward = false;
-    if (k === 'a') moveState.right = false; if (k === 'd') moveState.left = false;
+    if (k === 'w') moveState.forward = false; 
+    if (k === 's') moveState.backward = false;
+    if (k === 'a') moveState.right = false; 
+    if (k === 'd') moveState.left = false;
+    if (!e.shiftKey) moveState.shift = false;
 });
 
 // ====================================================================
@@ -287,34 +295,47 @@ function animate() {
 
         if (mDir.length() > 0) {
             mDir.normalize();
-            const curSpeed = (dPond < pondRadius) ? speed * 0.5 : speed;
+            // Juoksunopeuden säätö
+            const activeSpeed = moveState.shift ? runSpeed : baseSpeed;
+            const curSpeed = (dPond < pondRadius) ? activeSpeed * 0.5 : activeSpeed;
+            
             character.position.addScaledVector(mDir, curSpeed);
             character.rotation.y = Math.atan2(mDir.x, mDir.z) + modelRotationOffset;
             if (dPond < pondRadius && Math.random() < 0.1) createRipple(character.position.x, character.position.z);
         }
 
-        // SIENIEN KERÄYS JA VOITTOEFEKTI
         for (let i = mushrooms.length - 1; i >= 0; i--) {
             if (character.position.distanceTo(mushrooms[i].position) < 1.0) {
                 scene.remove(mushrooms[i]);
                 mushrooms.splice(i, 1);
                 mushroomsCollected++;
                 uiSienet.innerText = `Sieniä kerätty: ${mushroomsCollected} / 8`;
-                
-                // Tarkistetaan voittiko pelaaja
-                if (mushroomsCollected === 8) {
-                    uiVoitto.style.display = 'block';
-                }
+                if (mushroomsCollected === 8) uiVoitto.style.display = 'block';
             }
         }
 
         controls.target.copy(character.position).add(new THREE.Vector3(0, 1.5, 0));
         controls.update();
+
+        // VIHOLLISEN JAHTAUSLIIKE (POMPPIVA SIENI)
+        if (enemy) {
+            const enemyToChar = new THREE.Vector3().subVectors(character.position, enemy.position);
+            enemyToChar.y = 0; 
+            
+            if (enemyToChar.length() > 0.5) { 
+                enemyToChar.normalize();
+                enemy.position.addScaledVector(enemyToChar, enemySpeed);
+                enemy.rotation.y = Math.atan2(enemyToChar.x, enemyToChar.z);
+                
+                // POMPPIVA LIIKE
+                // Math.abs(Math.sin) saa aikaan jatkuvan nousevan ja laskevan loikan
+                enemy.position.y = normalGroundY + Math.abs(Math.sin(t * 10)) * 0.5;
+            }
+        }
     }
 
-    // Efektien päivitys (Lumi ja Renkaat)
-    const pos = snowParticles.geometry.attributes.position.array;
-    for(let i=1; i<pos.length; i+=3) { pos[i] -= 0.05; if (pos[i] < 0) pos[i] = 50; }
+    const snowArr = snowParticles.geometry.attributes.position.array;
+    for(let i=1; i<snowArr.length; i+=3) { snowArr[i] -= 0.05; if (snowArr[i] < 0) snowArr[i] = 50; }
     snowParticles.geometry.attributes.position.needsUpdate = true;
 
     ripples.forEach((r, i) => {
