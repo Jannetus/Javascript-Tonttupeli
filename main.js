@@ -30,24 +30,6 @@ uiSienet.style.borderRadius = '5px';
 uiSienet.innerText = 'Sieniä kerätty: 0 / 8';
 document.body.appendChild(uiSienet);
 
-const uiVoitto = document.createElement('div');
-uiVoitto.style.position = 'absolute';
-uiVoitto.style.top = '50%';
-uiVoitto.style.left = '50%';
-uiVoitto.style.transform = 'translate(-50%, -50%)';
-uiVoitto.style.padding = '40px';
-uiVoitto.style.background = 'rgba(0, 0, 0, 0.8)';
-uiVoitto.style.color = '#ffeb3b';
-uiVoitto.style.fontFamily = 'Arial, sans-serif';
-uiVoitto.style.fontSize = '24px';
-uiVoitto.style.fontWeight = 'bold';
-uiVoitto.style.borderRadius = '20px';
-uiVoitto.style.textAlign = 'center';
-uiVoitto.style.display = 'none'; 
-uiVoitto.style.border = '4px solid #ffeb3b';
-uiVoitto.innerText = 'Onnittelut, löysit kaikki 8 sientä!';
-document.body.appendChild(uiVoitto);
-
 const uiGameOver = document.createElement('div');
 uiGameOver.style.position = 'absolute';
 uiGameOver.style.top = '50%';
@@ -102,7 +84,6 @@ let currentGroundY = normalGroundY;
 
 let character, controls, duck, enemy, snowParticles;
 const loader = new GLTFLoader();
-const collidableObjects = []; 
 const rocks = [];            
 const mushrooms = [];
 const ripples = []; 
@@ -145,7 +126,18 @@ function createTree(x, z) {
     scene.add(group);
 }
 
+function createRock(x, z, s = 1) {
+    const rock = new THREE.Mesh(new THREE.IcosahedronGeometry(1.5 * s, 0), new THREE.MeshStandardMaterial({ color: 0x707070 }));
+    rock.position.set(x, 0.7 * s, z);
+    rock.scale.y = 0.6;
+    rock.userData.size = s; 
+    scene.add(rock);
+    rocks.push(rock); 
+}
+
+// Luodaan puut ja KIVET
 for(let i = 0; i < 10; i++) createTree((Math.random()-0.5)*80, (Math.random()-0.5)*80);
+for(let i = 0; i < 8; i++) createRock((Math.random()-0.5)*80, (Math.random()-0.5)*80, 0.3+Math.random()*0.4);
 
 const pond = new THREE.Mesh(new THREE.CylinderGeometry(pondRadius, pondRadius, 0.1, 64), new THREE.MeshStandardMaterial({ color: 0x0044ff, transparent: true, opacity: 0.7, metalness: 0.9, roughness: 0.1 }));
 pond.position.copy(pondCenter);
@@ -183,16 +175,6 @@ snowGeo.setAttribute('position', new THREE.BufferAttribute(snowPos, 3));
 snowParticles = new THREE.Points(snowGeo, new THREE.PointsMaterial({color: 0xffffff, size: 0.1}));
 scene.add(snowParticles);
 
-function createRipple(x, z) {
-    const rippleGeo = new THREE.RingGeometry(0.1, 0.2, 32);
-    const rippleMat = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.5, side: THREE.DoubleSide });
-    const ripple = new THREE.Mesh(rippleGeo, rippleMat);
-    ripple.rotation.x = -Math.PI / 2;
-    ripple.position.set(x, 0.12, z);
-    scene.add(ripple);
-    ripples.push({ mesh: ripple, age: 0 });
-}
-
 // ====================================================================
 // --- MALLIEN LATAUS ---
 // ====================================================================
@@ -212,7 +194,6 @@ loader.load('vihollinen.glb', (gltf) => {
     scene.add(enemy);
 });
 
-// KORJATTU: Ankka aloittaa lammesta
 loader.load('ankka.glb', (gltf) => {
     duck = gltf.scene;
     duck.scale.set(0.12, 0.12, 0.12);
@@ -221,13 +202,11 @@ loader.load('ankka.glb', (gltf) => {
     setNewDuckTarget();
 });
 
-// PALAUTETTU: Mökki maailmaan
 loader.load('mokki.glb', (gltf) => {
     const house = gltf.scene;
     house.scale.set(0.01, 0.01, 0.01);
     house.position.set(0, 0, -20);
     scene.add(house);
-    house.traverse(c => { if(c.isMesh) collidableObjects.push(c); });
 });
 
 function setNewDuckTarget() {
@@ -237,14 +216,13 @@ function setNewDuckTarget() {
 }
 
 // ====================================================================
-// --- RESET JA KONTROLLIT ---
+// --- INTERAKTIOT JA KONTROLLIT ---
 // ====================================================================
 
 function resetGame() {
     mushroomsCollected = 0;
     uiSienet.innerText = 'Sieniä kerätty: 0 / 8';
     uiGameOver.style.display = 'none';
-    uiVoitto.style.display = 'none';
     isGameOver = false;
     if (character) character.position.set(0, normalGroundY, 0);
     if (enemy) enemy.position.set(-25, normalGroundY, -25);
@@ -253,13 +231,19 @@ function resetGame() {
 
 window.addEventListener('mousedown', (event) => {
     if (isGameOver || event.button !== 0 || !character) return; 
+    
     if (!heldRock) {
         let closestRock = null; let minDist = 3.0;
         rocks.forEach(rock => {
             const d = character.position.distanceTo(rock.position);
             if (d < minDist) { minDist = d; closestRock = rock; }
         });
-        if (closestRock) { heldRock = closestRock; scene.remove(heldRock); uiRepu.innerText = 'Kantaa: Kivi'; }
+        if (closestRock) { 
+            heldRock = closestRock; 
+            scene.remove(heldRock); 
+            uiRepu.innerText = 'Kantaa: Kivi'; 
+            const idx = rocks.indexOf(heldRock); if (idx > -1) rocks.splice(idx, 1);
+        }
     } else {
         const throwRock = heldRock; heldRock = null; uiRepu.innerText = 'Kantaa: -';
         throwRock.position.copy(character.position).y += 1.5;
@@ -301,10 +285,8 @@ function animate() {
     const t = Date.now() * 0.001;
 
     if (character && enemy && !isGameOver) {
-        const distToEnemy = character.position.distanceTo(enemy.position);
-        if (distToEnemy < 1.0) {
-            isGameOver = true;
-            uiGameOver.style.display = 'block';
+        if (character.position.distanceTo(enemy.position) < 1.0) {
+            isGameOver = true; uiGameOver.style.display = 'block';
         }
 
         const dPond = new THREE.Vector2(character.position.x, character.position.z).distanceTo(new THREE.Vector2(pondCenter.x, pondCenter.z));
@@ -328,15 +310,12 @@ function animate() {
             const activeSpeed = moveState.shift ? runSpeed : baseSpeed;
             character.position.addScaledVector(mDir.normalize(), (dPond < pondRadius ? activeSpeed * 0.5 : activeSpeed));
             character.rotation.y = Math.atan2(mDir.x, mDir.z) + modelRotationOffset;
-            if (dPond < pondRadius && Math.random() < 0.1) createRipple(character.position.x, character.position.z);
         }
 
         for (let i = mushrooms.length - 1; i >= 0; i--) {
             if (character.position.distanceTo(mushrooms[i].position) < 1.0) {
                 scene.remove(mushrooms[i]); mushrooms.splice(i, 1);
-                mushroomsCollected++;
-                uiSienet.innerText = `Sieniä kerätty: ${mushroomsCollected} / 8`;
-                if (mushroomsCollected === 8) uiVoitto.style.display = 'block';
+                mushroomsCollected++; uiSienet.innerText = `Sieniä kerätty: ${mushroomsCollected} / 8`;
             }
         }
 
@@ -353,16 +332,12 @@ function animate() {
         }
     }
 
-    // Lumisade ja vesirenkaat
-    const snowArr = snowParticles.geometry.attributes.position.array;
-    for(let i=1; i<snowArr.length; i+=3) { snowArr[i] -= 0.05; if (snowArr[i] < 0) snowArr[i] = 50; }
-    snowParticles.geometry.attributes.position.needsUpdate = true;
-
-    ripples.forEach((r, i) => {
-        r.age += 0.02; r.mesh.scale.set(1 + r.age*5, 1 + r.age*5, 1);
-        r.mesh.material.opacity = 0.5 - r.age;
-        if (r.age > 0.5) { scene.remove(r.mesh); ripples.splice(i, 1); }
-    });
+    if (flyingRock) {
+        flyingRock.position.add(rockVelocity); rockVelocity.y += gravity;
+        const rd = new THREE.Vector2(flyingRock.position.x, flyingRock.position.z).distanceTo(new THREE.Vector2(pondCenter.x, pondCenter.z));
+        const rg = (rd < pondRadius) ? -0.1 : 0.4 * flyingRock.userData.size;
+        if (flyingRock.position.y <= rg) { flyingRock.position.y = rg; rocks.push(flyingRock); flyingRock = null; }
+    }
 
     if (duck) {
         const dt = duck.position.distanceTo(duckTarget);
@@ -374,6 +349,10 @@ function animate() {
         }
         duck.position.y = 0.15 + Math.sin(t * 3) * 0.02;
     }
+
+    const snowArr = snowParticles.geometry.attributes.position.array;
+    for(let i=1; i<snowArr.length; i+=3) { snowArr[i] -= 0.05; if (snowArr[i] < 0) snowArr[i] = 50; }
+    snowParticles.geometry.attributes.position.needsUpdate = true;
 
     renderer.render(scene, camera);
 }
